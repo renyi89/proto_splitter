@@ -1,3 +1,4 @@
+import os
 import csv
 
 def read_tsv(file_path):
@@ -26,17 +27,22 @@ def write_content(file_path, content):
     with open(file_path, 'w', encoding='utf-8') as file:
         file.write(content)
 
-def main(tsv_file, target_file):
+def process_files_in_directory(directory, mapping):
+    """处理指定目录下的所有文件"""
+    for root, _, files in os.walk(directory):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            new_content = replace_content(file_path, mapping)
+            write_content(file_path, new_content)
+
+def main(tsv_file, target_directory):
     # 读取TSV文件
     mapping = read_tsv(tsv_file)
     
-    # 替换目标文件内容
-    new_content = replace_content(target_file, mapping)
-    
-    # 写回目标文件
-    write_content(target_file, new_content)
+    # 处理目标文件夹内的所有文件
+    process_files_in_directory(target_directory, mapping)
 
 if __name__ == "__main__":
     tsv_file = 'mapping.tsv'  # TSV文件路径
-    target_file = 'all-in-one.proto'  # 目标文件路径
-    main(tsv_file, target_file)
+    target_directory = 'output'  # 目标文件夹路径
+    main(tsv_file, target_directory)
