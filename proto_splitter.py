@@ -13,10 +13,10 @@ import shutil   # py -m pip install shutilwhich
 ''' CONFIG Start '''
 
 # 输入文件夹路径
-INPUT_FOLDER = r'c:\linshi\input'
+INPUT_FOLDER = 'cmd'
 
 # 输出文件夹路径
-OUTPUT_FOLDER = r'c:\linshi\output'
+OUTPUT_FOLDER = 'protocol'
 
 # 定义文件头部内容
 HEADER_CONTENT = '''syntax = "proto3";
