@@ -20,7 +20,7 @@ OUTPUT_FOLDER = 'protocol'
 
 # 定义文件头部内容
 HEADER_CONTENT = '''syntax = "proto3";
-package proto;
+option java_package = "emu.grasscutter.net.proto";
 '''
 
 # 生成输出文件前永远清理输出文件夹
@@ -28,6 +28,12 @@ CLEAR_OUTPUTFOLDER_FOREVER = True
 
 # 允许未知 proto
 ALLOWUNKNOWNPROTO = False
+
+# 检查目标版本 不通过条件的不继续解析
+CHECK_VERSION = True
+
+# 目标版本 不要出现小数点
+VERSION = 520
 
 ''' CONFIG END '''
 
@@ -89,7 +95,7 @@ def parse_messages(content):
 builtin_types = {
     'double', 'float', 'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64',
     'fixed32', 'fixed64', 'sfixed32', 'sfixed64', 'bool', 'string', 'bytes',
-    'option', 'oneof'
+    'option', 'oneof', 'reserved', 'enum', 'message'
 }
 
 # 检查 message 中是否存在 enum CmdId 并且包含 CMD_ID
@@ -97,6 +103,13 @@ def has_cmd_id_enum(message):
     cmd_id_pattern = re.compile(r'enum\s+CmdId\s*\{[^}]*\bCMD_ID\s*=\s*(\d+);', re.DOTALL)
     match = cmd_id_pattern.search(message)
     return match.group(1) if match else None
+
+# 检查 message 中是否存在 enum Note 并且包含 VERSION
+def has_version_in_cmd_id(message):
+    version_pattern = re.compile(r'enum\s+Note\s*\{[^}]*\bVERSION\s*=\s*(\d+);', re.DOTALL)
+    match = version_pattern.search(message)
+    return int(match.group(1)) if match else None
+
 
 # 处理所有输入文件
 all_messages = []
@@ -109,23 +122,30 @@ for input_file in input_files:
     messages = parse_messages(content)
     all_messages.extend(messages)
 
+# 初始化计数
 processed_count = 0
-skip_count = 0
+unknown_skip_count = 0
+skip_count_old_version = 0
+
 # 将每个 message 保存到独立的文件中
 for message in all_messages:
     # 提取 message 名称
     message_name = re.search(r'(message|enum)\s+(\w+)', message).group(2)
     # 跳过全大写的未知 proto
     if message_name.isupper() and ALLOWUNKNOWNPROTO == False:
-        skip_count += 1
+        print("未知字段 " + message_name + " 被跳过")
+        unknown_skip_count += 1
         continue
+
+    # CHECK_VERSION 判断方法放在这里性能会有优化 但是生成的注释 version 会在 cmdid 下面
+    # 对 cmdid 脚本不友好
     
     # 记录需要导入的未知类型
     imports = set()
 
     # 解析 message 中的数据类型
     # 这样写会导致 enum 类型生成的文件导入无关包 所以用下面的正则
-    # type_pattern = re.compile(r'\b(\w+)\b\s+\w+\s*=', re.MULTILINE)
+    # type_pattern = re.compile(r'\b(\w+)\b\s+\w+\s*=', re.MULTILINE)   # 备份一下
     type_pattern = re.compile(r'^\s*\w*\s*(\b\w+\b)\s+\w+\s*=', re.MULTILINE)
     types = type_pattern.findall(message)
     
@@ -137,6 +157,19 @@ for message in all_messages:
     cmd_id_value = has_cmd_id_enum(message)
     if cmd_id_value:
         message = f'// CmdId: {cmd_id_value}\n{message}'
+
+    # 检查源文件 VERSION 是否符合要求
+    version_value = has_version_in_cmd_id(message)
+    if CHECK_VERSION:
+        if version_value is not None:
+            if version_value != VERSION:
+                skip_count_old_version += 1
+                continue
+            else:
+                message = f'// version: {version_value}\n{message}'
+        else:   # 没有 version_value 的情况下
+            skip_count_old_version += 1
+            continue
     
     # 构建输出文件路径
     output_file_path = os.path.join(OUTPUT_FOLDER, f'{message_name}.proto')
@@ -149,9 +182,9 @@ for message in all_messages:
         output_file.write(final_content)
     processed_count += 1
 
-print(f'共找到 {len(all_messages)} 条 message|enum')
-
-if skip_count > 0:
-    print(f'有 {skip_count} 条不会被保存为文件 因为它们是未知字段')
-
+print(f'\n共找到 {len(all_messages)} 条 message|enum')
+if unknown_skip_count > 0:
+    print(f'有 {unknown_skip_count} 条不会被保存为文件 因为它们是未知字段')
+if skip_count_old_version > 0:
+    print(f'有 {skip_count_old_version} 条不会被保存为文件 因为它们并非目标版本')
 print(f'成功将其中 {processed_count} 条 分割并保存到 {OUTPUT_FOLDER}')
