@@ -26,6 +26,9 @@ package proto;
 # 生成输出文件前永远清理输出文件夹
 CLEAR_OUTPUTFOLDER_FOREVER = True
 
+# 允许未知 proto
+ALLOWUNKNOWNPROTO = False
+
 ''' CONFIG END '''
 
 
@@ -55,7 +58,7 @@ else:
 # 读取输入文件夹中的所有 .proto 文件
 input_files = [os.path.join(INPUT_FOLDER, f) for f in os.listdir(INPUT_FOLDER) if f.endswith('.proto')]
 
-# 处理嵌套的 message enum oneof
+# 处理嵌套的 message enum
 def parse_messages(content):
     messages = []
     stack = []
@@ -64,7 +67,7 @@ def parse_messages(content):
 
     lines = content.splitlines()
     for line in lines:
-        if 'message' in line or 'enum' in line or 'oneof' in line:
+        if 'message' in line or 'enum' in line:
             if in_message:
                 stack.append(current_message)
             current_message = line
@@ -86,7 +89,7 @@ def parse_messages(content):
 builtin_types = {
     'double', 'float', 'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64',
     'fixed32', 'fixed64', 'sfixed32', 'sfixed64', 'bool', 'string', 'bytes',
-    'option'
+    'option', 'oneof'
 }
 
 # 检查 message 中是否存在 enum CmdId 并且包含 CMD_ID
@@ -106,10 +109,16 @@ for input_file in input_files:
     messages = parse_messages(content)
     all_messages.extend(messages)
 
+processed_count = 0
+skip_count = 0
 # 将每个 message 保存到独立的文件中
 for message in all_messages:
     # 提取 message 名称
     message_name = re.search(r'(message|enum)\s+(\w+)', message).group(2)
+    # 跳过全大写的未知 proto
+    if message_name.isupper() and ALLOWUNKNOWNPROTO == False:
+        skip_count += 1
+        continue
     
     # 记录需要导入的未知类型
     imports = set()
@@ -138,5 +147,11 @@ for message in all_messages:
     # 写入文件
     with open(output_file_path, 'w', encoding='utf-8') as output_file:
         output_file.write(final_content)
+    processed_count += 1
 
-print(f'成功将 {len(all_messages)} 条 message 分割并保存到 {OUTPUT_FOLDER}')
+print(f'共找到 {len(all_messages)} 条 message|enum')
+
+if skip_count > 0:
+    print(f'有 {skip_count} 条不会被保存为文件 因为它们是未知字段')
+
+print(f'成功将其中 {processed_count} 条 分割并保存到 {OUTPUT_FOLDER}')
