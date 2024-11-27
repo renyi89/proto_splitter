@@ -1,7 +1,7 @@
 # /**
-#  * @作者 亡灵奶龙大帝
 #  * @注意 源文件不能出现带有 枚举cmdid 的 proto 被嵌套进另一个 proto， 否则生成的 cmdid 注释会混乱
-#  * @brief 将多个 .proto 文件中的 message enum oneof 分解为独立的 .proto 文件。
+#  * @注意 源 message 如果出现 oneof 类型 则下面的字段都会被丢弃 直到进入下一个 message
+#  * @brief 将多个 .proto 文件中的 message enum 分解为独立的 .proto 文件。
 #  **/
 
 import os
@@ -13,7 +13,7 @@ import shutil   # py -m pip install shutilwhich
 ''' CONFIG Start '''
 
 # 输入文件夹路径
-INPUT_FOLDER = 'cmd'
+INPUT_FOLDER = './'
 
 # 输出文件夹路径
 OUTPUT_FOLDER = 'protocol'
@@ -24,13 +24,13 @@ option java_package = "emu.grasscutter.net.proto";
 '''
 
 # 生成输出文件前永远清理输出文件夹
-CLEAR_OUTPUTFOLDER_FOREVER = True
+CLEAR_OUTPUTFOLDER_FOREVER = False
 
 # 允许未知 proto
 ALLOWUNKNOWNPROTO = False
 
 # 检查目标版本 不通过条件的不继续解析
-CHECK_VERSION = True
+CHECK_VERSION = False
 
 # 目标版本 不要出现小数点
 VERSION = 520
@@ -95,7 +95,8 @@ def parse_messages(content):
 builtin_types = {
     'double', 'float', 'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64',
     'fixed32', 'fixed64', 'sfixed32', 'sfixed64', 'bool', 'string', 'bytes',
-    'option', 'oneof', 'reserved', 'enum', 'message'
+    'option', 'optional', 'oneof', 'reserved', 'enum', 'message', 
+    'repeated', ' repeated ',' repeated', 'repeated ',
 }
 
 # 检查 message 中是否存在 enum CmdId 并且包含 CMD_ID
@@ -126,14 +127,22 @@ for input_file in input_files:
 processed_count = 0
 unknown_skip_count = 0
 skip_count_old_version = 0
+is_enum = False
 
 # 将每个 message 保存到独立的文件中
 for message in all_messages:
+    is_enum = False
+
+    # 确保文件的结尾是 } 不然有 oneof 关键字出现时会少一个括号
+    if message.endswith('\n}') == False:
+        message += '\n}'
+
     # 提取 message 名称
     message_name = re.search(r'(message|enum)\s+(\w+)', message).group(2)
+
     # 跳过全大写的未知 proto
     if message_name.isupper() and ALLOWUNKNOWNPROTO == False:
-        print("未知字段 " + message_name + " 被跳过")
+        # print("未知字段 " + message_name + " 被跳过")
         unknown_skip_count += 1
         continue
 
@@ -146,21 +155,51 @@ for message in all_messages:
     # 解析 message 中的数据类型
     # 这样写会导致 enum 类型生成的文件导入无关包 所以用下面的正则
     # type_pattern = re.compile(r'\b(\w+)\b\s+\w+\s*=', re.MULTILINE)   # 备份一下
-    type_pattern = re.compile(r'^\s*\w*\s*(\b\w+\b)\s+\w+\s*=', re.MULTILINE)
+    # type_pattern = re.compile(r'^\s*\w*\s*(\b\w+\b)\s+\w+\s*=', re.MULTILINE)
+    # type_pattern = re.compile(r'^\s*(map<[\w, ]+>|[\w]+)\s+\w+\s*=', re.MULTILINE)
+    type_pattern = re.compile(r'^\s*(map<[\w, ]+>|repeated+\s+[\w]+|optional+\s+[\w]+|[\w]+)\s+\w+\s*=', re.MULTILINE)
     types = type_pattern.findall(message)
     
     for data_type in types:
-        if data_type not in builtin_types:
-            imports.add(f'import "{data_type}.proto";')
+        print(data_type)
+        if 'map<' in data_type:
+            # 提取 map 中的键和值类型
+            key_type, value_type = data_type[4:-1].split(',')
+            key_type = key_type.strip()
+            value_type = value_type.strip()
+            # 处理 map 类型
+            if key_type not in builtin_types:
+                imports.add(f'import "{key_type}.proto";')
+            if value_type not in builtin_types:
+                imports.add(f'import "{value_type}.proto";')
+        elif 'repeated' in data_type:
+            # 提取 repeated 类型
+            repeated_type = data_type.split()[1]
+            if repeated_type not in builtin_types:
+                imports.add(f'import "{repeated_type}.proto";')
+        elif 'optional' in data_type:
+            # 提取 optional 类型
+            optional_type = data_type.split()[1]
+            if optional_type not in builtin_types:
+                imports.add(f'import "{optional_type}.proto";')
+        else:
+            if data_type not in builtin_types:
+                imports.add(f'import "{data_type}.proto";')
     
     # 检查 message 中是否存在 enum CmdId 并且包含 CMD_ID
     cmd_id_value = has_cmd_id_enum(message)
     if cmd_id_value:
         message = f'// CmdId: {cmd_id_value}\n{message}'
 
-    # 检查源文件 VERSION 是否符合要求
+    # 检查是否枚举类型
+    if re.search(r'(enum)\s+(Note)', message):
+        is_enum = False
+    elif re.search(r'(enum)\s+(\w+)', message):
+        is_enum = True
+
+    # 检查源文件 VERSION 是否符合要求 不对枚举起作用
     version_value = has_version_in_cmd_id(message)
-    if CHECK_VERSION:
+    if CHECK_VERSION and is_enum == False:
         if version_value is not None:
             if version_value != VERSION:
                 skip_count_old_version += 1
