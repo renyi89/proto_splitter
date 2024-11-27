@@ -159,31 +159,40 @@ for message in all_messages:
     # type_pattern = re.compile(r'^\s*(map<[\w, ]+>|[\w]+)\s+\w+\s*=', re.MULTILINE)
     type_pattern = re.compile(r'^\s*(map<[\w, ]+>|repeated+\s+[\w]+|optional+\s+[\w]+|[\w]+)\s+\w+\s*=', re.MULTILINE)
     types = type_pattern.findall(message)
+
+    # 记录内部定义的类型
+    internal_typology = set()
+
+    # 提取内部定义的 enum 类型
+    enum_pattern = re.compile(r'enum\s+(\w+)\s*\{', re.MULTILINE)
+    internal_typology.update(enum_pattern.findall(message))
+    # 提取内部定义的 message 类型
+    message_pattern = re.compile(r'message\s+(\w+)\s*\{', re.MULTILINE)
+    internal_typology.update(message_pattern.findall(message))
     
     for data_type in types:
-        print(data_type)
         if 'map<' in data_type:
             # 提取 map 中的键和值类型
             key_type, value_type = data_type[4:-1].split(',')
             key_type = key_type.strip()
             value_type = value_type.strip()
             # 处理 map 类型
-            if key_type not in builtin_types:
+            if key_type not in builtin_types and key_type not in internal_typology:
                 imports.add(f'import "{key_type}.proto";')
-            if value_type not in builtin_types:
+            if value_type not in builtin_types and value_type not in internal_typology:
                 imports.add(f'import "{value_type}.proto";')
         elif 'repeated' in data_type:
             # 提取 repeated 类型
             repeated_type = data_type.split()[1]
-            if repeated_type not in builtin_types:
+            if repeated_type not in builtin_types and repeated_type not in internal_typology:
                 imports.add(f'import "{repeated_type}.proto";')
         elif 'optional' in data_type:
             # 提取 optional 类型
             optional_type = data_type.split()[1]
-            if optional_type not in builtin_types:
+            if optional_type not in builtin_types and optional_type not in internal_typology:
                 imports.add(f'import "{optional_type}.proto";')
         else:
-            if data_type not in builtin_types:
+            if data_type not in builtin_types and data_type not in internal_typology:
                 imports.add(f'import "{data_type}.proto";')
     
     # 检查 message 中是否存在 enum CmdId 并且包含 CMD_ID
