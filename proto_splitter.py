@@ -13,10 +13,10 @@ import shutil   # py -m pip install shutilwhich
 ''' CONFIG Start '''
 
 # 输入文件夹路径
-INPUT_FOLDER = './'
+INPUT_FOLDER = './proto/v5.7.0/protocol/'
 
 # 输出文件夹路径
-OUTPUT_FOLDER = 'protocol'
+OUTPUT_FOLDER = 'D:\\projects\\GC\\LunaGC_5.7.0\\src\\main\\proto'
 
 # 定义文件头部内容
 HEADER_CONTENT = '''syntax = "proto3";
@@ -24,7 +24,7 @@ option java_package = "emu.grasscutter.net.proto";
 '''
 
 # 生成输出文件前永远清理输出文件夹
-CLEAR_OUTPUTFOLDER_FOREVER = False
+CLEAR_OUTPUTFOLDER_FOREVER = True
 
 # 允许未知 proto
 ALLOWUNKNOWNPROTO = False
@@ -33,16 +33,16 @@ ALLOWUNKNOWNPROTO = False
 CHECK_VERSION = False
 
 # 目标版本 不要出现小数点
-VERSION = 520
+VERSION = 570
 
 ''' CONFIG END '''
 
+print('start')
 
 if os.path.exists(OUTPUT_FOLDER):
     if CLEAR_OUTPUTFOLDER_FOREVER:
         response = "y"
     else:
-        # 询问用户是否清理输出文件夹
         response = input(f"输出文件夹 {OUTPUT_FOLDER} 已存在，是否先清理其中的文件？ (y/n): ").strip().lower()
 
     if response == 'y':
@@ -63,6 +63,7 @@ else:
 
 # 读取输入文件夹中的所有 .proto 文件
 input_files = [os.path.join(INPUT_FOLDER, f) for f in os.listdir(INPUT_FOLDER) if f.endswith('.proto')]
+print(input_files)
 
 # 处理嵌套的 message enum
 def parse_messages(content):
@@ -86,6 +87,36 @@ def parse_messages(content):
                 messages.append(current_message)
                 current_message = ''
                 in_message = False
+        elif in_message:
+            current_message += '\n' + line
+
+    return messages
+
+# 处理嵌套的 message enum //fx 括号平衡
+def parse_messages_fx(content):
+    messages = []
+    current_message = ''
+    in_message = False
+    value_left = 0
+
+    lines = content.splitlines()
+    for index,line in enumerate(lines):
+        if '{' in line:
+            value_left += 1
+        if '}' in line:
+            value_left -= 1
+        if not in_message and ( 'message ' in line or 'enum ' in line ):
+            in_message = True
+            current_message =  line
+            if lines[index-1].startswith( '//' ):
+                current_message = lines[index-1] + '\n' + current_message
+            if lines[index-2].startswith( '//' ):
+                current_message = lines[index-2] + '\n' + current_message
+        elif in_message and value_left == 0:
+            in_message = False
+            current_message += '\n'+  line
+            messages.append(current_message)
+            current_message = ''
         elif in_message:
             current_message += '\n' + line
 
@@ -120,7 +151,8 @@ for input_file in input_files:
         raw_content = file.read()
         detected_encoding = chardet.detect(raw_content)['encoding']
         content = raw_content.decode(detected_encoding)
-    messages = parse_messages(content)
+    # content = re.sub(r'\{(?!\n)', '{\n', content)
+    messages = parse_messages_fx(content)
     all_messages.extend(messages)
 
 # 初始化计数
@@ -131,11 +163,12 @@ is_enum = False
 
 # 将每个 message 保存到独立的文件中
 for message in all_messages:
+    bans = []
     is_enum = False
 
-    # 确保文件的结尾是 } 不然有 oneof 关键字出现时会少一个括号
-    if message.endswith('\n}') == False:
-        message += '\n}'
+    # # 确保文件的结尾是 } 不然有 oneof 关键字出现时会少一个括号
+    # if message.endswith('\n}') == False:
+    #     message += '\n}'
 
     # 提取 message 名称
     message_name = re.search(r'(message|enum)\s+(\w+)', message).group(2)
@@ -157,7 +190,7 @@ for message in all_messages:
     # type_pattern = re.compile(r'\b(\w+)\b\s+\w+\s*=', re.MULTILINE)   # 备份一下
     # type_pattern = re.compile(r'^\s*\w*\s*(\b\w+\b)\s+\w+\s*=', re.MULTILINE)
     # type_pattern = re.compile(r'^\s*(map<[\w, ]+>|[\w]+)\s+\w+\s*=', re.MULTILINE)
-    type_pattern = re.compile(r'^\s*(map<[\w, ]+>|repeated+\s+[\w]+|optional+\s+[\w]+|[\w]+)\s+\w+\s*=', re.MULTILINE)
+    type_pattern = re.compile(r'^\s*(map<[\w, ]+>|repeated+\s+[\w]+|optional+\s+[\w]+|[\w.]+)\s+\w+\s*=', re.MULTILINE)
     types = type_pattern.findall(message)
 
     # 记录内部定义的类型
@@ -178,22 +211,46 @@ for message in all_messages:
             value_type = value_type.strip()
             # 处理 map 类型
             if key_type not in builtin_types and key_type not in internal_typology:
-                imports.add(f'import "{key_type}.proto";')
+                if key_type.isupper() and ALLOWUNKNOWNPROTO == False:
+                    bans.append(key_type)
+                else:
+                    imports.add(f'import "{key_type}.proto";')
             if value_type not in builtin_types and value_type not in internal_typology:
-                imports.add(f'import "{value_type}.proto";')
+                if value_type.isupper() and ALLOWUNKNOWNPROTO == False:
+                    bans.append(value_type)
+                else:
+                    imports.add(f'import "{value_type}.proto";')
         elif 'repeated' in data_type:
             # 提取 repeated 类型
             repeated_type = data_type.split()[1]
             if repeated_type not in builtin_types and repeated_type not in internal_typology:
-                imports.add(f'import "{repeated_type}.proto";')
+                if repeated_type.isupper() and ALLOWUNKNOWNPROTO == False:
+                    bans.append(repeated_type)
+                else:
+                    imports.add(f'import "{repeated_type}.proto";')
         elif 'optional' in data_type:
             # 提取 optional 类型
             optional_type = data_type.split()[1]
             if optional_type not in builtin_types and optional_type not in internal_typology:
-                imports.add(f'import "{optional_type}.proto";')
+                if optional_type.isupper() and ALLOWUNKNOWNPROTO == False:
+                    bans.append(optional_type)
+                else:
+                    imports.add(f'import "{optional_type}.proto";')
         else:
+            data_type = data_type.split(".")[0]
             if data_type not in builtin_types and data_type not in internal_typology:
-                imports.add(f'import "{data_type}.proto";')
+                if data_type.isupper() and ALLOWUNKNOWNPROTO == False:
+                    bans.append(data_type)
+                else:
+                    imports.add(f'import "{data_type}.proto";')
+    if ALLOWUNKNOWNPROTO == False:
+
+        # 保留不包含任何关键词的行
+        filtered_lines = [line for line in message.splitlines()
+                  if not any(keyword in line for keyword in bans)]
+
+        # 合并为新文本
+        message = "\n".join(filtered_lines)
     
     # 检查 message 中是否存在 enum CmdId 并且包含 CMD_ID
     cmd_id_value = has_cmd_id_enum(message)
